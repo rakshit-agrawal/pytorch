@@ -27,3 +27,4 @@ test/.coverage
 */*.so*
 */**/*.so*
 */**/*.dylib*
+*.idea/*
