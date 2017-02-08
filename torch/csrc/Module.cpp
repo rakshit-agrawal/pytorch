@@ -697,7 +697,29 @@ bool THCSPShortTensor_init(PyObject *module);
 bool THCSPCharTensor_init(PyObject *module);
 bool THCSPByteTensor_init(PyObject *module);
 
+bool THDPDoubleStorage_init(PyObject *module);
+bool THDPFloatStorage_init(PyObject *module);
+//bool THDPHalfStorage_init(PyObject *module);
+bool THDPLongStorage_init(PyObject *module);
+bool THDPIntStorage_init(PyObject *module);
+bool THDPShortStorage_init(PyObject *module);
+bool THDPCharStorage_init(PyObject *module);
+bool THDPByteStorage_init(PyObject *module);
+
+bool THDPDoubleTensor_init(PyObject *module);
+bool THDPFloatTensor_init(PyObject *module);
+//bool THDPHalfTensor_init(PyObject *module);
+bool THDPLongTensor_init(PyObject *module);
+bool THDPIntTensor_init(PyObject *module);
+bool THDPShortTensor_init(PyObject *module);
+bool THDPCharTensor_init(PyObject *module);
+bool THDPByteTensor_init(PyObject *module);
+
 static std::vector<PyMethodDef> methods;
+
+#ifdef WITH_DISTRIBUTED
+PyMethodDef* THDPModule_methods();
+#endif
 
 #if PY_MAJOR_VERSION == 2
 PyMODINIT_FUNC init_C()
@@ -716,6 +738,9 @@ PyMODINIT_FUNC PyInit__C()
 #ifdef WITH_CUDNN
   THPUtils_addPyMethodDefs(methods, THCUDNN_methods());
 #endif
+#ifdef WITH_DISTRIBUTED
+  THPUtils_addPyMethodDefs(methods, THDPModule_methods());
+#endif
 
 #if PY_MAJOR_VERSION == 2
   ASSERT_TRUE(module = Py_InitModule("torch._C", methods.data()));
@@ -729,6 +754,7 @@ PyMODINIT_FUNC PyInit__C()
   };
   ASSERT_TRUE(module = PyModule_Create(&torchmodule));
 #endif
+  ASSERT_TRUE(THPWrapper_init(module));
   ASSERT_TRUE(THPGenerator_init(module));
   ASSERT_TRUE(THPException_init(module));
   ASSERT_TRUE(THPSize_init(module));
@@ -796,13 +822,34 @@ PyMODINIT_FUNC PyInit__C()
 #endif
 
 #ifdef WITH_CUDNN
-  ASSERT_TRUE(THCUDNNModule_initModule(module));
   PyObject *has_cudnn = Py_True;
 #else
   PyObject *has_cudnn = Py_False;
 #endif
   Py_INCREF(has_cudnn);
   ASSERT_TRUE(PyModule_AddObject(module, "has_cudnn", has_cudnn) == 0);
+
+  // TODO THD: enable once master-worker mode is implemented
+#if 0 && defined(WITH_DISTRIBUTED)
+  // See comment on CUDA objects
+  ASSERT_TRUE(THDPDoubleStorage_init(module));
+  ASSERT_TRUE(THDPFloatStorage_init(module));
+  //ASSERT_TRUE(THDPHalfStorage_init(module));
+  ASSERT_TRUE(THDPLongStorage_init(module));
+  ASSERT_TRUE(THDPIntStorage_init(module));
+  ASSERT_TRUE(THDPShortStorage_init(module));
+  ASSERT_TRUE(THDPCharStorage_init(module));
+  ASSERT_TRUE(THDPByteStorage_init(module));
+
+  ASSERT_TRUE(THDPDoubleTensor_init(module));
+  ASSERT_TRUE(THDPFloatTensor_init(module));
+  //ASSERT_TRUE(THDPHalfTensor_init(module));
+  ASSERT_TRUE(THDPLongTensor_init(module));
+  ASSERT_TRUE(THDPIntTensor_init(module));
+  ASSERT_TRUE(THDPShortTensor_init(module));
+  ASSERT_TRUE(THDPCharTensor_init(module));
+  ASSERT_TRUE(THDPByteTensor_init(module));
+#endif
 
   THPDefaultGenerator = (THPGenerator*)THPGenerator_New();
   ASSERT_TRUE(THPDefaultGenerator != nullptr);
