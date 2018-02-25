@@ -1,23 +1,23 @@
 #pragma once
 
-#include <Python.h>
+#include "torch/csrc/utils/python_stub.h"
 
 template<class T>
 class THPPointer {
 public:
   THPPointer(): ptr(nullptr) {};
-  THPPointer(T *ptr): ptr(ptr) {};
+  explicit THPPointer(T *ptr): ptr(ptr) {};
   THPPointer(THPPointer &&p) { free(); ptr = p.ptr; p.ptr = nullptr; };
 
   ~THPPointer() { free(); };
   T * get() { return ptr; }
   const T * get() const { return ptr; }
-  T * release() { T *tmp = ptr; ptr = NULL; return tmp; }
+  T * release() { T *tmp = ptr; ptr = nullptr; return tmp; }
   operator T*() { return ptr; }
   THPPointer& operator =(T *new_ptr) { free(); ptr = new_ptr; return *this; }
   THPPointer& operator =(THPPointer &&p) { free(); ptr = p.ptr; p.ptr = nullptr; return *this; }
   T * operator ->() { return ptr; }
-  operator bool() { return ptr != nullptr; }
+  operator bool() const { return ptr != nullptr; }
 
 private:
   void free();

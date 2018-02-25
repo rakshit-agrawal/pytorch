@@ -27,8 +27,8 @@ class LBFGS(Optimizer):
             step (default: max_iter * 1.25).
         tolerance_grad (float): termination tolerance on first order optimality
             (default: 1e-5).
-        tolerance_change (float): termination tolerance on function value/parameter
-            changes (default: 1e-9).
+        tolerance_change (float): termination tolerance on function
+            value/parameter changes (default: 1e-9).
         history_size (int): update history size (default: 100).
     """
 
@@ -55,14 +55,23 @@ class LBFGS(Optimizer):
         return self._numel_cache
 
     def _gather_flat_grad(self):
-        return torch.cat(
-            tuple(param.grad.data.view(-1) for param in self._params), 0)
+        views = []
+        for p in self._params:
+            if p.grad is None:
+                view = p.data.new(p.data.numel()).zero_()
+            elif p.grad.data.is_sparse:
+                view = p.grad.data.to_dense().view(-1)
+            else:
+                view = p.grad.data.view(-1)
+            views.append(view)
+        return torch.cat(views, 0)
 
     def _add_grad(self, step_size, update):
         offset = 0
         for p in self._params:
             numel = p.numel()
-            p.data.add_(step_size, update[offset:offset + numel])
+            # view as to avoid deprecated pointwise semantics
+            p.data.add_(step_size, update[offset:offset + numel].view_as(p.data))
             offset += numel
         assert offset == self._numel()
 
@@ -84,13 +93,15 @@ class LBFGS(Optimizer):
         line_search_fn = group['line_search_fn']
         history_size = group['history_size']
 
-        state = self.state['global_state']
+        # NOTE: LBFGS has only global state, but we register it as state for
+        # the first param, because this helps with casting in load_state_dict
+        state = self.state[self._params[0]]
         state.setdefault('func_evals', 0)
         state.setdefault('n_iter', 0)
 
         # evaluate initial f(x) and df/dx
         orig_loss = closure()
-        loss = orig_loss.data[0]
+        loss = float(orig_loss)
         current_evals = 1
         state['func_evals'] += 1
 
@@ -178,18 +189,14 @@ class LBFGS(Optimizer):
             ############################################################
             # compute step length
             ############################################################
-            # directional derivative
-            gtd = flat_grad.dot(d)  # g * d
-
-            # check that progress can be made along that direction
-            if gtd > -tolerance_change:
-                break
-
             # reset initial guess for step size
             if state['n_iter'] == 1:
                 t = min(1., 1. / abs_grad_sum) * lr
             else:
                 t = lr
+
+            # directional derivative
+            gtd = flat_grad.dot(d)  # g * d
 
             # optional line search: user function
             ls_func_evals = 0
@@ -203,7 +210,7 @@ class LBFGS(Optimizer):
                     # re-evaluate function only if not in last iteration
                     # the reason we do this: in a stochastic setting,
                     # no use to re-evaluate that function here
-                    loss = closure().data[0]
+                    loss = float(closure())
                     flat_grad = self._gather_flat_grad()
                     abs_grad_sum = flat_grad.abs().sum()
                     ls_func_evals = 1
@@ -222,6 +229,9 @@ class LBFGS(Optimizer):
                 break
 
             if abs_grad_sum <= tolerance_grad:
+                break
+
+            if gtd > -tolerance_change:
                 break
 
             if d.mul(t).abs_().sum() <= tolerance_change:

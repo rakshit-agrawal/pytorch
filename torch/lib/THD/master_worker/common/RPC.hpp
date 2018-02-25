@@ -1,10 +1,8 @@
 #pragma once
-
-#include "../../base/Tensor.hpp"
-#include "../../base/Storage.hpp"
 #include "../master/THDTensor.h"
 #include "ByteArray.hpp"
 #include "TH/THStorage.h"
+#include "RPCType.hpp"
 
 #include <cstdint>
 #include <memory>
@@ -38,16 +36,14 @@ private:
 };
 
 template <typename ...Args>
-std::unique_ptr<RPCMessage> packMessage(
-                        function_id_type fid,
-                        const Args&... args
-                        );
+std::unique_ptr<RPCMessage> packMessage(function_id_type fid, const Args&... args);
 
-Type unpackType(RPCMessage& raw_message);
-Type peekType(RPCMessage& raw_message);
+RPCType unpackType(RPCMessage& raw_message);
+RPCType peekType(RPCMessage& raw_message);
 double unpackFloat(RPCMessage& raw_message);
-std::uint16_t unpackFunctionId(RPCMessage& raw_message);
-long long unpackInteger(RPCMessage& raw_message);
+function_id_type unpackFunctionId(RPCMessage& raw_message);
+int64_t unpackInteger(RPCMessage& raw_message);
+object_id_type unpackGenerator(RPCMessage& raw_message);
 object_id_type unpackTensor(RPCMessage& raw_message);
 object_id_type unpackStorage(RPCMessage& raw_message);
 THLongStorage* unpackTHLongStorage(RPCMessage& raw_message);

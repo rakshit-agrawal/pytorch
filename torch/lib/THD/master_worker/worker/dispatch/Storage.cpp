@@ -1,62 +1,62 @@
-static std::unique_ptr<Storage> createStorage(Type type) {
-  if (type == Type::UCHAR)
-    return std::unique_ptr<Storage>(new THStorage<unsigned char>());
-  else if (type == Type::CHAR)
-    return std::unique_ptr<Storage>(new THStorage<char>());
-  else if (type == Type::SHORT)
-    return std::unique_ptr<Storage>(new THStorage<short>());
-  else if (type == Type::INT)
-    return std::unique_ptr<Storage>(new THStorage<int>());
-  else if (type == Type::LONG)
-    return std::unique_ptr<Storage>(new THStorage<long>());
-  else if (type == Type::FLOAT)
-    return std::unique_ptr<Storage>(new THStorage<float>());
-  else if (type == Type::DOUBLE)
-    return std::unique_ptr<Storage>(new THStorage<double>());
+static std::unique_ptr<at::Storage> createStorage(RPCType type) {
+  if (type == RPCType::UCHAR)
+    return at::getType(at::Backend::CPU, at::ScalarType::Byte).storage();
+  else if (type == RPCType::CHAR)
+    return at::getType(at::Backend::CPU, at::ScalarType::Char).storage();
+  else if (type == RPCType::SHORT)
+    return at::getType(at::Backend::CPU, at::ScalarType::Short).storage();
+  else if (type == RPCType::INT)
+    return at::getType(at::Backend::CPU, at::ScalarType::Int).storage();
+  else if (type == RPCType::LONG)
+    return at::getType(at::Backend::CPU, at::ScalarType::Long).storage();
+  else if (type == RPCType::FLOAT)
+    return at::getType(at::Backend::CPU, at::ScalarType::Float).storage();
+  else if (type == RPCType::DOUBLE)
+    return at::getType(at::Backend::CPU, at::ScalarType::Double).storage();
   throw std::invalid_argument("passed character doesn't represent a storage type");
 }
 
-static std::unique_ptr<Storage> createStorage(Type type, std::size_t size) {
-  std::unique_ptr<Storage> storage = createStorage(type);
+static std::unique_ptr<at::Storage> createStorage(RPCType type, std::size_t size) {
+  std::unique_ptr<at::Storage> storage = createStorage(type);
   storage->resize(size);
   return storage;
 }
 
 static void storageSet(rpc::RPCMessage& raw_message) {
-  Storage *storage = unpackRetrieveStorage(raw_message);
+  at::Storage *storage = unpackRetrieveStorage(raw_message);
   ptrdiff_t offset = unpackInteger(raw_message);
-  Type type = peekType(raw_message);
+  RPCType type = peekType(raw_message);
   if (isInteger(type)) {
-    long long value = unpackInteger(raw_message);
+    int64_t value = unpackInteger(raw_message);
     finalize(raw_message);
-    dynamic_cast<IntStorage *>(storage)->set(offset, value);
+    storage->set(offset, value);
   } else if (isFloat(type)) {
     double value = unpackFloat(raw_message);
     finalize(raw_message);
-    dynamic_cast<FloatStorage *>(storage)->set(offset, value);
+    storage->set(offset, value);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
 }
 
 static void storageGet(rpc::RPCMessage& raw_message) {
-  Storage *storage = unpackRetrieveStorage(raw_message);
+  at::Storage *storage = unpackRetrieveStorage(raw_message);
   ptrdiff_t offset = unpackInteger(raw_message);
-  Type type = unpackType(raw_message);
+  RPCType type = unpackType(raw_message);
   finalize(raw_message);
   if (isInteger(type)) {
-    long long value = dynamic_cast<IntStorage *>(storage)->get(offset);
+    int64_t value = storage->get(offset).to<int64_t>();
     sendValueToMaster(value);
   } else if (isFloat(type)) {
-    double value = dynamic_cast<FloatStorage *>(storage)->get(offset);
+    double value = storage->get(offset).to<double>();
     sendValueToMaster(value);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
 }
 
-static void storageConstruct(rpc::RPCMessage& raw_message) {
-  Type storage_type = unpackType(raw_message);
+static void storageNew(rpc::RPCMessage& raw_message) {
+  RPCType storage_type = unpackType(raw_message);
   object_id_type storage_id = unpackStorage(raw_message);
   finalize(raw_message);
   workerStorages.emplace(
@@ -65,10 +65,10 @@ static void storageConstruct(rpc::RPCMessage& raw_message) {
   );
 }
 
-static void storageConstructWithSize(rpc::RPCMessage& raw_message) {
-  Type storage_type = unpackType(raw_message);
+static void storageNewWithSize(rpc::RPCMessage& raw_message) {
+  RPCType storage_type = unpackType(raw_message);
   object_id_type storage_id = unpackStorage(raw_message);
-  long long size = unpackInteger(raw_message);
+  int64_t size = unpackInteger(raw_message);
   finalize(raw_message);
   workerStorages.emplace(
     storage_id,
@@ -76,27 +76,25 @@ static void storageConstructWithSize(rpc::RPCMessage& raw_message) {
   );
 }
 
-static void storageConstructWithSizeN(rpc::RPCMessage& raw_message, std::size_t size) {
-  Type storage_type = unpackType(raw_message);
+static void storageNewWithSizeN(rpc::RPCMessage& raw_message, std::size_t size) {
+  RPCType storage_type = unpackType(raw_message);
   object_id_type storage_id = unpackStorage(raw_message);
-  std::unique_ptr<Storage> storage = createStorage(storage_type, size);
-  Type value_type = peekType(raw_message);
+  std::unique_ptr<at::Storage> storage = createStorage(storage_type, size);
+  RPCType value_type = peekType(raw_message);
   if (isInteger(value_type)) {
-    IntStorage *raw_storage = dynamic_cast<IntStorage *>(storage.get());
-    long long values[size];
+    int64_t values[size];
     for (std::size_t i = 0; i < size; i++)
       values[i] = unpackInteger(raw_message);
     finalize(raw_message);
     for (std::size_t i = 0; i < size; i++)
-      raw_storage->fast_set(i, values[i]);
+      storage->fast_set(i, values[i]);
   } else if (isFloat(value_type)) {
-    FloatStorage *raw_storage = dynamic_cast<FloatStorage *>(storage.get());
     double values[size];
     for (std::size_t i = 0; i < size; i++)
       values[i] = unpackInteger(raw_message);
     finalize(raw_message);
     for (std::size_t i = 0; i < size; i++)
-      raw_storage->fast_set(i, values[i]);
+      storage->fast_set(i, values[i]);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
@@ -107,20 +105,20 @@ static void storageConstructWithSizeN(rpc::RPCMessage& raw_message, std::size_t 
   );
 }
 
-static void storageConstructWithSize1(rpc::RPCMessage& raw_message) {
-  storageConstructWithSizeN(raw_message, 1);
+static void storageNewWithSize1(rpc::RPCMessage& raw_message) {
+  storageNewWithSizeN(raw_message, 1);
 }
 
-static void storageConstructWithSize2(rpc::RPCMessage& raw_message) {
-  storageConstructWithSizeN(raw_message, 2);
+static void storageNewWithSize2(rpc::RPCMessage& raw_message) {
+  storageNewWithSizeN(raw_message, 2);
 }
 
-static void storageConstructWithSize3(rpc::RPCMessage& raw_message) {
-  storageConstructWithSizeN(raw_message, 3);
+static void storageNewWithSize3(rpc::RPCMessage& raw_message) {
+  storageNewWithSizeN(raw_message, 3);
 }
 
-static void storageConstructWithSize4(rpc::RPCMessage& raw_message) {
-  storageConstructWithSizeN(raw_message, 4);
+static void storageNewWithSize4(rpc::RPCMessage& raw_message) {
+  storageNewWithSizeN(raw_message, 4);
 }
 
 static void storageFree(rpc::RPCMessage& raw_message) {
@@ -130,23 +128,23 @@ static void storageFree(rpc::RPCMessage& raw_message) {
 }
 
 static void storageResize(rpc::RPCMessage& raw_message) {
-  Storage *storage = unpackRetrieveStorage(raw_message);
-  long long new_size = unpackInteger(raw_message);
+  at::Storage *storage = unpackRetrieveStorage(raw_message);
+  int64_t new_size = unpackInteger(raw_message);
   finalize(raw_message);
   storage->resize(new_size);
 }
 
 static void storageFill(rpc::RPCMessage& raw_message) {
-  Storage *storage = unpackRetrieveStorage(raw_message);
-  Type type = peekType(raw_message);
+  at::Storage *storage = unpackRetrieveStorage(raw_message);
+  RPCType type = peekType(raw_message);
   if (isInteger(type)) {
-    long long val = unpackInteger(raw_message);
+    int64_t val = unpackInteger(raw_message);
     finalize(raw_message);
-    dynamic_cast<IntStorage *>(storage)->fill(val);
+    storage->fill(val);
   } else if (isFloat(type)) {
     double val = unpackFloat(raw_message);
     finalize(raw_message);
-    dynamic_cast<FloatStorage *>(storage)->fill(val);
+    storage->fill(val);
   } else {
     throw std::invalid_argument("expected scalar type");
   }

@@ -1,6 +1,5 @@
 #include <cstdint>
 #include "TH/THStorage.h"
-#include "base/Traits.hpp"
 #include "Traits.hpp"
 
 namespace thd { namespace rpc { namespace detail {
@@ -14,29 +13,36 @@ inline void _appendScalar(ByteArray& str, real data) {
   str.append(reinterpret_cast<char*>(&data), sizeof(data));
 }
 
-inline void _appendType(ByteArray& str, Type _type) {
+inline void _appendType(ByteArray& str, RPCType _type) {
   char type = static_cast<char>(_type);
   str.append(&type, sizeof(type));
 }
 
 template<typename T>
 inline void __appendData(ByteArray& str, const T& arg,
-    std::false_type is_tensor, std::false_type is_storage) {
+    std::false_type is_generator, std::false_type is_tensor, std::false_type is_storage) {
   _appendType(str, type_traits<T>::type);
   _appendScalar<T>(str, arg);
 }
 
 template<typename T>
 inline void __appendData(ByteArray& str, const T& arg,
-    std::true_type is_tensor, std::false_type is_storage) {
-  _appendType(str, Type::TENSOR);
+    std::true_type is_generator, std::false_type is_tensor, std::false_type is_storage) {
+  _appendType(str, RPCType::GENERATOR);
+  _appendScalar<object_id_type>(str, arg->generator_id);
+}
+
+template<typename T>
+inline void __appendData(ByteArray& str, const T& arg,
+    std::false_type is_generator, std::true_type is_tensor, std::false_type is_storage) {
+  _appendType(str, RPCType::TENSOR);
   _appendScalar<object_id_type>(str, arg->tensor_id);
 }
 
 template<typename T>
 inline void __appendData(ByteArray& str, const T& arg,
-    std::false_type is_tensor, std::true_type is_storage) {
-  _appendType(str, Type::STORAGE);
+    std::false_type is_generator, std::false_type is_tensor, std::true_type is_storage) {
+  _appendType(str, RPCType::STORAGE);
   _appendScalar<object_id_type>(str, arg->storage_id);
 }
 
@@ -45,19 +51,36 @@ inline void _appendData(ByteArray& str, const T& arg) {
   __appendData(
       str,
       arg,
+      is_any_of<T, THDGeneratorPtrTypes>(),
       is_any_of<T, THDTensorPtrTypes>(),
       is_any_of<T, THDStoragePtrTypes>()
   );
 }
 
 inline void _appendData(ByteArray& str, THLongStorage* arg) {
-  _appendType(str, Type::LONG_STORAGE);
+  _appendType(str, RPCType::LONG_STORAGE);
+  _appendScalar<char>(str, arg == NULL);
+  if (!arg) return;
   _appendScalar<ptrdiff_t>(str, arg->size);
   for (ptrdiff_t i = 0; i < arg->size; i++)
-    _appendScalar<long>(str, arg->data[i]);
+    _appendScalar<int64_t>(str, arg->data[i]);
 }
 
-inline void _appendData(ByteArray& str, Type type) {
+template<typename T>
+inline void _appendData(ByteArray& str, const std::vector<T>& arg) {
+  int l = arg.size();
+  _appendData(str, l);
+  for (std::size_t i = 0; i < l; i++)
+    __appendData(
+        str,
+        arg[i],
+        is_any_of<T, THDGeneratorPtrTypes>(),
+        is_any_of<T, THDTensorPtrTypes>(),
+        is_any_of<T, THDStoragePtrTypes>()
+    );
+}
+
+inline void _appendData(ByteArray& str, RPCType type) {
   _appendType(str, type);
 }
 

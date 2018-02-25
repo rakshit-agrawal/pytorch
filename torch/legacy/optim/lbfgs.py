@@ -115,7 +115,7 @@ def lbfgs(opfunc, x, config, state=None):
             # do lbfgs update (update memory)
             y = state['dir_bufs'].pop()
             s = state['stp_bufs'].pop()
-            torch.add(g, -1, g_old, out=y)
+            torch.add(g, g_old, alpha=-1, out=y)
             torch.mul(d, t, out=s)
             ys = y.dot(s)  # y*s
             if ys > 1e-10:
@@ -179,10 +179,6 @@ def lbfgs(opfunc, x, config, state=None):
         # directional derivative
         gtd = g.dot(d)  # g * d
 
-        # check that progress can be made along that direction
-        if gtd > -tolX:
-            break
-
         # reset initial guess for step size
         if state['nIter'] == 1:
             tmp1.copy_(g).abs_()
@@ -228,6 +224,10 @@ def lbfgs(opfunc, x, config, state=None):
         if tmp1.sum() <= tolFun:
             # check optimality
             verbose('optimality condition below tolFun')
+            break
+
+        # check that progress can be made along that direction
+        if gtd > -tolX:
             break
 
         tmp1.copy_(d).mul_(t).abs_()

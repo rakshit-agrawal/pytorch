@@ -1,4 +1,5 @@
 import math
+import torch
 from .optimizer import Optimizer
 
 
@@ -10,7 +11,8 @@ class Rprop(Optimizer):
             parameter groups
         lr (float, optional): learning rate (default: 1e-2)
         etas (Tuple[float, float], optional): pair of (etaminus, etaplis), that
-            are multiplicative increase and decrease factors (default: (0.5, 1.2))
+            are multiplicative increase and decrease factors
+            (default: (0.5, 1.2))
         step_sizes (Tuple[float, float], optional): a pair of minimal and
             maximal allowed step sizes (default: (1e-6, 50))
     """
@@ -32,13 +34,17 @@ class Rprop(Optimizer):
 
         for group in self.param_groups:
             for p in group['params']:
+                if p.grad is None:
+                    continue
                 grad = p.grad.data
+                if grad.is_sparse:
+                    raise RuntimeError('Rprop does not support sparse gradients')
                 state = self.state[p]
 
                 # State initialization
                 if len(state) == 0:
                     state['step'] = 0
-                    state['prev'] = grad.new().resize_as_(grad).zero_()
+                    state['prev'] = torch.zeros_like(p.data)
                     state['step_size'] = grad.new().resize_as_(grad).fill_(group['lr'])
 
                 etaminus, etaplus = group['etas']

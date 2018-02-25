@@ -9,7 +9,7 @@ class Module(object):
         self.gradInput = torch.Tensor()
         self.output = torch.Tensor()
         self._type = self.output.type()
-        self._backend = torch._thnn.type2backend[type(self.output)]
+        self._backend = torch._thnn.type2backend[self.output.type()]
 
     def __repr__(self):
         return 'nn.' + self.__class__.__name__
@@ -49,13 +49,19 @@ class Module(object):
         pass
 
     def accUpdateGradParameters(self, input, gradOutput, lr):
-        gradWeight = self.gradWeight
-        gradBias = self.gradBias
-        self.gradWeight = self.weight
-        self.gradBias = self.bias
+        has_weight = hasattr(self, 'weight') and self.weight is not None
+        has_bias = hasattr(self, 'bias') and self.bias is not None
+        if has_weight:
+            gradWeight = self.gradWeight
+            self.gradWeight = self.weight
+        if has_bias:
+            gradBias = self.gradBias
+            self.gradBias = self.bias
         self.accGradParameters(input, gradOutput, -lr)
-        self.gradWeight = gradWeight
-        self.gradBias = gradBias
+        if has_weight:
+            self.gradWeight = gradWeight
+        if has_bias:
+            self.gradBias = gradBias
 
     def sharedAccUpdateGradParameters(self, input, gradOutput, lr):
         if self.parameters():
@@ -70,10 +76,11 @@ class Module(object):
                 grad.zero_()
 
     def updateParameters(self, learningRate):
-        params, gradParams = self.parameters()
-        if params:
-            for p, gp in zip(params, gradParams):
-                p.add_(-learningRate, gp)
+        if self.parameters() is not None:
+            params, gradParams = self.parameters()
+            if params:
+                for p, gp in zip(params, gradParams):
+                    p.add_(-learningRate, gp)
 
     def training(self):
         self.train = True

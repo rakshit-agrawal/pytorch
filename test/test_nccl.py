@@ -4,18 +4,23 @@ import torch
 import torch.cuda.nccl as nccl
 import torch.cuda
 
-from common import TestCase, run_tests
-
-if not torch.cuda.is_available():
-    print('CUDA not available, skipping tests')
-    import sys
-    sys.exit()
+from common import TestCase, run_tests, IS_WINDOWS
 
 nGPUs = torch.cuda.device_count()
+if nGPUs == 0:
+    print('CUDA not available, skipping tests')
+    TestCase = object  # noqa: F811
 
 
 class TestNCCL(TestCase):
 
+    @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
+    def test_unique_id(self):
+        uid = nccl.unique_id()
+        self.assertIsInstance(uid, bytes)
+        self.assertGreater(len(uid), 1)
+
+    @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     @unittest.skipIf(nGPUs < 2, "only one GPU detected")
     def test_broadcast(self):
         expected = torch.FloatTensor(128).uniform_()
@@ -28,6 +33,7 @@ class TestNCCL(TestCase):
         for i in range(torch.cuda.device_count()):
             self.assertEqual(tensors[i], expected)
 
+    @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     @unittest.skipIf(nGPUs < 2, "only one GPU detected")
     def test_reduce(self):
         tensors = [torch.FloatTensor(128).uniform_() for i in range(nGPUs)]
@@ -40,6 +46,7 @@ class TestNCCL(TestCase):
 
         self.assertEqual(tensors[0], expected)
 
+    @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     @unittest.skipIf(nGPUs < 2, "only one GPU detected")
     def test_all_reduce(self):
         tensors = [torch.FloatTensor(128).uniform_() for i in range(nGPUs)]
@@ -53,6 +60,7 @@ class TestNCCL(TestCase):
         for tensor in tensors:
             self.assertEqual(tensor, expected)
 
+    @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     @unittest.skipIf(nGPUs < 2, "only one GPU detected")
     def test_all_gather(self):
         inputs = [torch.FloatTensor(128).uniform_() for i in range(nGPUs)]
@@ -66,6 +74,7 @@ class TestNCCL(TestCase):
         for tensor in outputs:
             self.assertEqual(tensor, expected)
 
+    @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     @unittest.skipIf(nGPUs < 2, "only one GPU detected")
     def test_reduce_scatter(self):
         in_size = 32 * nGPUs

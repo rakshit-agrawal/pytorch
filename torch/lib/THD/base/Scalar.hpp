@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Traits.hpp"
+#include "../master_worker/common/RPCType.hpp"
 #include <cstddef>
 
 namespace thd {
@@ -14,7 +14,8 @@ struct Scalar {
   virtual std::size_t elementSize() const = 0;
   virtual void* data() = 0;
   virtual const void* data() const = 0;
-  virtual Type type() const = 0;
+  virtual RPCType type() const = 0;
+  virtual Scalar* clone() const = 0;
 };
 
 template<typename real>
@@ -35,8 +36,12 @@ struct ScalarWrapper : Scalar {
     return &_value;
   }
 
-  virtual Type type() const override {
+  virtual RPCType type() const override {
     return type_traits<real>::type;
+  }
+
+  virtual ScalarWrapper* clone() const override {
+    return new ScalarWrapper(value());
   }
 
   real value() const {
@@ -48,6 +53,6 @@ private:
 };
 
 using FloatScalar = ScalarWrapper<double>;
-using IntScalar = ScalarWrapper<long long>;
+using IntScalar = ScalarWrapper<int64_t>;
 
 } // namespace thd

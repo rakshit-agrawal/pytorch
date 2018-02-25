@@ -6,9 +6,9 @@ import shutil
 import random
 import tempfile
 import unittest
-import sys
 import traceback
 import torch
+import torch.utils.data
 import torch.cuda
 import warnings
 from torch.autograd import Variable
@@ -16,10 +16,13 @@ from torch.utils.trainer import Trainer
 from torch.utils.trainer.plugins import *
 from torch.utils.trainer.plugins.plugin import Plugin
 from torch.utils.serialization import load_lua
+from torch.autograd._functions.utils import prepare_onnx_paddings
+from torch.autograd._functions.utils import check_onnx_broadcast
+from common import IS_WINDOWS
 
 HAS_CUDA = torch.cuda.is_available()
 
-from common import TestCase, run_tests
+from common import TestCase, run_tests, download_file
 
 try:
     import cffi
@@ -106,6 +109,46 @@ class DatasetMock(object):
 
     def __len__(self):
         return 10
+
+
+class TestDataLoader(TestCase):
+    def setUp(self):
+        self.dataset = torch.randn(5, 3, 3, 2)
+        self.batch_size = 3
+
+    def test_single_keep(self):
+        dataloader = torch.utils.data.DataLoader(self.dataset,
+                                                 batch_size=self.batch_size,
+                                                 num_workers=0,
+                                                 drop_last=False)
+        dataiter = iter(dataloader)
+        self.assertEqual(len(list(dataiter)), 2)
+
+    def test_single_drop(self):
+        dataloader = torch.utils.data.DataLoader(self.dataset,
+                                                 batch_size=self.batch_size,
+                                                 num_workers=0,
+                                                 drop_last=True)
+        dataiter = iter(dataloader)
+        self.assertEqual(len(list(dataiter)), 1)
+
+    @unittest.skipIf(IS_WINDOWS, "FIXME: Intermittent CUDA out-of-memory error")
+    def test_multi_keep(self):
+        dataloader = torch.utils.data.DataLoader(self.dataset,
+                                                 batch_size=self.batch_size,
+                                                 num_workers=2,
+                                                 drop_last=False)
+        dataiter = iter(dataloader)
+        self.assertEqual(len(list(dataiter)), 2)
+
+    @unittest.skipIf(IS_WINDOWS, "FIXME: Intermittent CUDA out-of-memory error")
+    def test_multi_drop(self):
+        dataloader = torch.utils.data.DataLoader(self.dataset,
+                                                 batch_size=self.batch_size,
+                                                 num_workers=2,
+                                                 drop_last=True)
+        dataiter = iter(dataloader)
+        self.assertEqual(len(list(dataiter)), 1)
 
 
 class TestTrainer(TestCase):
@@ -297,39 +340,13 @@ class TestLuaReader(TestCase):
         return do_test
 
     @classmethod
-    def _download_data(cls, test_file_path):
-        if os.path.exists(test_file_path):
-            return
-        print('Downloading test file for TestLuaReader.')
-        DATA_URL = 'https://s3.amazonaws.com/pytorch/legacy_modules.t7'
-        urllib = cls._get_urllib('request')
-        data = urllib.urlopen(DATA_URL, timeout=15).read()
-        with open(test_file_path, 'wb') as f:
-            f.write(data)
-
-    @staticmethod
-    def _get_urllib(submodule):
-        if sys.version_info < (3,):
-            import urllib2
-            return urllib2
-        else:
-            import urllib.error
-            import urllib.request
-            return getattr(urllib, submodule)
-
-    @classmethod
     def init(cls):
-        data_dir = os.path.join(os.path.dirname(__file__), 'data')
-        test_file_path = os.path.join(data_dir, 'legacy_modules.t7')
-        urllib = cls._get_urllib('error')
         try:
-            cls._download_data(test_file_path)
-        except urllib.URLError as e:
-            warnings.warn(("Couldn't download the test file for TestLuaReader! "
-                           "Tests will be incomplete!"), RuntimeWarning)
+            path = download_file('https://download.pytorch.org/test_data/legacy_modules.t7')
+        except unittest.SkipTest:
             return
-
-        tests = load_lua(test_file_path)
+        long_size = 8 if sys.platform == 'win32' else None
+        tests = load_lua(path, long_size=long_size)
         for name, test in tests['modules'].items():
             test_name = 'test_' + name.replace('nn.', '')
             setattr(cls, test_name, cls._module_test(name, test))
@@ -366,6 +383,66 @@ class TestLuaReader(TestCase):
 
     def _transform_MultiMarginCriterion(self, input, target):
         return input, target.sub(1)
+
+
+class TestONNXUtils(TestCase):
+    def test_prepare_onnx_paddings(self):
+        sizes = [2, 3, 4]
+        pad = [1, 2, 3, 4]
+        paddings = prepare_onnx_paddings(len(sizes), pad)
+        self.assertEqual(paddings, [0, 3, 1, 0, 4, 2])
+
+    def test_check_onnx_broadcast(self):
+
+        def try_check_onnx_broadcast(dims1, dims2, expect_broadcast, expect_fail):
+            broadcast = True
+            fail = False
+            try:
+                broadcast = check_onnx_broadcast(dims1, dims2)
+            except ValueError:
+                fail = True
+            self.assertEqual(broadcast, expect_broadcast)
+            self.assertEqual(fail, expect_fail)
+
+        # Case 1, check the case when len(dims1) < len(dims2) and numel(dims2) > 1
+        dims1 = [3, 4]
+        dims2 = [2, 3, 4]
+        try_check_onnx_broadcast(dims1, dims2, True, True)
+
+        # Case 2, check the case when len(dims1) < len(dims2) and numel(dims2) == 1
+        dims1 = [3, 4]
+        dims2 = [1, 1, 1]
+        try_check_onnx_broadcast(dims1, dims2, True, False)
+
+        # Case 3, check the case when len(dims1) > len(dims2) and numel(dims2) == 1
+        dims1 = [1, 1]
+        dims2 = [1]
+        try_check_onnx_broadcast(dims1, dims2, True, False)
+
+        # Case 4, check the case when len(dims1) > len(dims2) and dims1[x:] == dims2
+        dims1 = [2, 3, 4]
+        dims2 = [3, 4]
+        try_check_onnx_broadcast(dims1, dims2, True, False)
+
+        # Case 5, check the case when len(dims1) > len(dims2), but dims1[x:] != dims2
+        dims1 = [2, 3, 4]
+        dims2 = [1, 4]
+        try_check_onnx_broadcast(dims1, dims2, True, True)
+
+        # Case 6, check the equal case, no broadcast
+        dims1 = [3, 4]
+        dims2 = [3, 4]
+        try_check_onnx_broadcast(dims1, dims2, False, False)
+
+        # Case 7, check the case when len(dims1) == len(dims2), but dims1 != dims2
+        dims1 = [3, 4]
+        dims2 = [1, 4]
+        try_check_onnx_broadcast(dims1, dims2, True, True)
+
+        # Case 8, check the case when len(dims1) == len(dims2) and numel(s2) == 1
+        dims1 = [3, 4]
+        dims2 = [1, 1]
+        try_check_onnx_broadcast(dims1, dims2, True, False)
 
 
 TestLuaReader.init()

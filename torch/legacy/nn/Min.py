@@ -23,13 +23,13 @@ class Min(Module):
             self._output = self.output.new()
         if self._indices is None:
             self._indices = \
-                (torch.cuda.LongTensor() if torch.typename(self.output) == 'torch.cuda.FloatTensor'
+                (torch.cuda.LongTensor() if self.output.type() == 'torch.cuda.FloatTensor'
                  else torch.LongTensor())
 
     def updateOutput(self, input):
         self._lazyInit()
         dimension = self._getPositiveDimension(input)
-        torch.min(input, dimension, out=(self._output, self._indices))
+        torch.min(input, dimension, out=(self._output, self._indices), keepdim=True)
         if input.dim() > 1:
             self.output.set_(self._output.select(dimension, 0))
         else:

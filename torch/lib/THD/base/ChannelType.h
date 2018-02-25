@@ -2,5 +2,7 @@
 
 enum THDChannelType {
   THDChannelTCP = 0,
-  THDChannelMPI
+  THDChannelMPI,
+  THDChannelGloo,
+  THDChannelNccl
 };

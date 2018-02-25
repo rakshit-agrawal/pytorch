@@ -17,7 +17,7 @@ class DotProduct(Module):
             self.buffer = input1.new()
 
         torch.mul(input1, input2, out=self.buffer)
-        torch.sum(self.buffer, 1, out=self.output)
+        torch.sum(self.buffer, 1, True, out=self.output)
         self.output.resize_(input1.size(0))
         return self.output
 
@@ -38,7 +38,7 @@ class DotProduct(Module):
         gw1.resize_as_(v1).copy_(v2)
         gw2.resize_as_(v2).copy_(v1)
 
-        go = gradOutput.view(-1, 1).expand_as(v1)
+        go = gradOutput.contiguous().view(-1, 1).expand_as(v1)
         gw1.mul_(go)
         gw2.mul_(go)
 

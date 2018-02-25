@@ -4,36 +4,44 @@ from string import Template
 from copy import deepcopy
 from .plugins import ArgcountChecker, OptionalArguments, ArgumentReferences, \
     BeforeAfterCall, ConstantArguments, ReturnArguments, GILRelease
+from ..shared import cwrap_common
 
 
 class cwrap(object):
+    BASE_INDENT_SIZE = 6
+
     RETURN_WRAPPERS = {
         'void': Template('Py_RETURN_NONE;'),
         'long': Template('return PyLong_FromLong($result);'),
+        'int64_t': Template('return PyLong_FromLong($result);'),
         'bool': Template('return PyBool_FromLong($result);'),
         'void*': Template('return PyLong_FromVoidPtr($result);'),
     }
 
     OPTION_TEMPLATE = Template("""
     ${els}if ($arg_check) {
+      $pre_arg_assign
+      $arg_assign
       $code
     """)
+
+    ARG_ASSIGN_TEMPLATE = Template("""${type} ${name} = ${unpack};""")
 
     OPTION_CODE_TEMPLATE = [
         '$call',
         '$return_result',
     ]
 
-    FUNCTION_CALL_TEMPLATE = Template("$capture_result$cname($arg_unpack);")
+    FUNCTION_CALL_TEMPLATE = Template("$capture_result$cname($call_arg);")
 
     DEFAULT_PLUGIN_CLASSES = [ArgcountChecker, ConstantArguments, OptionalArguments,
                               ArgumentReferences, BeforeAfterCall, ReturnArguments, GILRelease]
 
-    def __init__(self, source, destination=None, plugins=[], default_plugins=True):
+    def __init__(self, source, destination=None, plugins=None, default_plugins=True):
         if destination is None:
             destination = source.replace('.cwrap', '.cpp')
 
-        self.plugins = plugins
+        self.plugins = [] if plugins is None else plugins
         if default_plugins:
             defaults = [cls() for cls in self.DEFAULT_PLUGIN_CLASSES]
             self.plugins = defaults + self.plugins
@@ -45,12 +53,26 @@ class cwrap(object):
         with open(source, 'r') as f:
             declarations = f.read()
 
+        # wrap all the declarations in the source .cwrap file
         wrapper = self.wrap_declarations(declarations)
+
+        # let each plugin do any post-processing of the wrapped file
         for plugin in self.plugins:
             wrapper = plugin.process_full_file(wrapper)
 
-        with open(destination, 'w') as f:
-            f.write(wrapper)
+        # See Note [Unchanging results for ninja]
+        try:
+            with open(destination, 'r') as f:
+                old_wrapper = f.read()
+        except IOError:
+            old_wrapper = None
+
+        if old_wrapper != wrapper:
+            with open(destination, 'w') as f:
+                print("Writing {}".format(destination))
+                f.write(wrapper)
+        else:
+            print("Skipped writing {}".format(destination))
 
     def wrap_declarations(self, declarations):
         lines = declarations.split('\n')
@@ -67,7 +89,7 @@ class cwrap(object):
             elif line == ']]':
                 in_declaration = False
                 declaration = yaml.load('\n'.join(declaration_lines))
-                self.set_declaration_defaults(declaration)
+                cwrap_common.set_declaration_defaults(declaration)
 
                 # Pass declaration in a list - maybe some plugins want to add
                 # multiple wrappers
@@ -95,24 +117,6 @@ class cwrap(object):
 
         return '\n'.join(output)
 
-    def set_declaration_defaults(self, declaration):
-        declaration.setdefault('arguments', [])
-        declaration.setdefault('return', 'void')
-        if 'cname' not in declaration:
-            declaration['cname'] = declaration['name']
-        # Simulate multiple dispatch, even if it's not necessary
-        if 'options' not in declaration:
-            declaration['options'] = [{'arguments': declaration['arguments']}]
-            del declaration['arguments']
-        # Parse arguments (some of them can be strings)
-        for option in declaration['options']:
-            option['arguments'] = self.parse_arguments(option['arguments'])
-        # Propagate defaults from declaration to options
-        for option in declaration['options']:
-            for k, v in declaration.items():
-                if k != 'name' and k != 'options':
-                    option.setdefault(k, v)
-
     def parse_arguments(self, args):
         new_args = []
         for arg in args:
@@ -130,6 +134,10 @@ class cwrap(object):
         return new_args
 
     def search_plugins(self, fnname, args, fallback):
+        """Search plugins for the given function to call with args.
+
+        If not found, call fallback with args.
+        """
         for plugin in self.plugins:
             wrapper = getattr(plugin, fnname)(*args)
             if wrapper is not None:
@@ -147,6 +155,9 @@ class cwrap(object):
 
     def get_wrapper_template(self, declaration):
         return self.search_plugins('get_wrapper_template', (declaration,), lambda _: None)
+
+    def get_assign_args(self, arguments):
+        return self.search_plugins('get_assign_args', (arguments,), lambda _: arguments)
 
     def get_arg_accessor(self, arg, option):
         def wrap_accessor(arg, _):
@@ -178,8 +189,43 @@ class cwrap(object):
             res = tmpl.substitute(arg=accessor, idx=arg.get('idx'))
             for plugin in self.plugins:
                 res = getattr(plugin, plugin_fn_name)(res, arg, accessor)
+
             result.append(res)
         return result
+
+    def build_option_args(self, arguments, arg_unpack):
+        assignement = []
+        call_arg = []
+        # If types or names needs to be changed
+        arguments = self.get_assign_args(arguments)
+        for arg, unpack in zip(arguments, arg_unpack):
+            if arg['type'] == 'CONSTANT':
+                call_arg.append(unpack)
+            else:
+                var_name = "arg_" + str(arg.get('assign_name', arg['name']))
+                res = self.ARG_ASSIGN_TEMPLATE.substitute(
+                    type=arg['type'],
+                    name=var_name,
+                    unpack=unpack)
+
+                if var_name not in call_arg:
+                    assignement.append(res)
+                call_arg.append(var_name)
+        return assignement, call_arg
+
+    def indent_code(self, code):
+        if code == '':
+            return code
+        code_lines = map(lambda s: s.strip(), code.split('\n'))
+        code = '\n'
+        depth = self.BASE_INDENT_SIZE
+        for line in code_lines:
+            depth -= line.count('}') * 2
+            code += ' ' * depth + line + '\n'
+            depth += line.count('{') * 2
+            depth += line.count('(') * 4
+            depth -= line.count(')') * 4
+        return code[:-1]
 
     def generate_option(self, option, is_first):
         checked_args = list(filter(
@@ -199,22 +245,29 @@ class cwrap(object):
         for plugin in self.plugins:
             arg_checks = plugin.process_all_checks(arg_checks, option)
 
-        # Generate unpacks
+        # Generate pre_arg assign
+        pre_arg_assign = []
+        for plugin in self.plugins:
+            pre_arg_assign = plugin.process_pre_arg_assign(pre_arg_assign, option)
+
+        # Generate arg assignment and call arguments
         arg_unpack = self.map_selected_arguments('get_type_unpack',
                                                  'process_single_unpack', option, option['arguments'])
-        arg_unpack = ', '.join(arg_unpack)
+        arg_assign, call_arg = self.build_option_args(option['arguments'], arg_unpack)
+
+        call_arg = ', '.join(call_arg)
         for plugin in self.plugins:
-            arg_unpack = plugin.process_all_unpacks(arg_unpack, option)
+            call_arg = plugin.process_all_call_arg(call_arg, option)
 
         # Generate call
         try:
             return_result = self.get_return_wrapper(option).substitute()
             call = self.FUNCTION_CALL_TEMPLATE.substitute(capture_result='',
-                                                          cname=option['cname'], arg_unpack=arg_unpack)
+                                                          cname=option['cname'], call_arg=call_arg)
         except KeyError:
             return_result = self.get_return_wrapper(option).substitute(result='__result')
             call = self.FUNCTION_CALL_TEMPLATE.substitute(capture_result=(option['return'] + ' __result = '),
-                                                          cname=option['cname'], arg_unpack=arg_unpack)
+                                                          cname=option['cname'], call_arg=call_arg)
 
         code_template = deepcopy(self.OPTION_CODE_TEMPLATE)
         for plugin in self.plugins:
@@ -222,19 +275,15 @@ class cwrap(object):
                                                                 option)
         code_template = Template('\n'.join(code_template))
         code = code_template.substitute(call=call, return_result=return_result)
-        code_lines = map(lambda s: s.strip(), code.split('\n'))
-        code = '\n'
-        depth = 6
-        for line in code_lines:
-            depth -= line.count('}') * 2
-            code += ' ' * depth + line + '\n'
-            depth += line.count('{') * 2
-            depth += line.count('(') * 4
-            depth -= line.count(')') * 4
+        code = self.indent_code(code)
+        pre_arg_assign = self.indent_code('\n'.join(pre_arg_assign))
+        arg_assign = self.indent_code('\n'.join(arg_assign))
 
         # Put everything together
         return self.OPTION_TEMPLATE.substitute(
             els=('} else ' if not is_first else ''),
             arg_check=arg_checks,
+            pre_arg_assign=pre_arg_assign,
+            arg_assign=arg_assign,
             code=code,
         )

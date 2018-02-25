@@ -1,43 +1,65 @@
 #include "TensorDescriptor.hpp"
-#include "tensors/THTensor.hpp"
+#include "Cuda.hpp"
 
-using namespace thd;
-
-THDTensorDescriptor* THDTensorDescriptor_newFromTHDoubleTensor(THDoubleTensor *tensor) {
-  THDoubleTensor_retain(tensor);
-  return new THTensor<double>(tensor);
+THDTensorDescriptor THDTensorDescriptor_newFromTHDoubleTensor(THDoubleTensor *tensor) {
+  return at::getType(at::Backend::CPU, at::ScalarType::Double).unsafeTensorFromTH((void*)tensor, true);
 }
 
-THDTensorDescriptor* THDTensorDescriptor_newFromTHFloatTensor(THFloatTensor *tensor) {
-  THFloatTensor_retain(tensor);
-  return new THTensor<float>(tensor);
+THDTensorDescriptor THDTensorDescriptor_newFromTHFloatTensor(THFloatTensor *tensor) {
+  return at::getType(at::Backend::CPU, at::ScalarType::Float).unsafeTensorFromTH((void*)tensor, true);
 }
 
-THDTensorDescriptor* THDTensorDescriptor_newFromTHLongTensor(THLongTensor *tensor) {
-  THLongTensor_retain(tensor);
-  return new THTensor<long>(tensor);
+THDTensorDescriptor THDTensorDescriptor_newFromTHLongTensor(THLongTensor *tensor) {
+  return at::getType(at::Backend::CPU, at::ScalarType::Long).unsafeTensorFromTH((void*)tensor, true);
 }
 
-THDTensorDescriptor* THDTensorDescriptor_newFromTHIntTensor(THIntTensor *tensor) {
-  THIntTensor_retain(tensor);
-  return new THTensor<int>(tensor);
+THDTensorDescriptor THDTensorDescriptor_newFromTHIntTensor(THIntTensor *tensor) {
+  return at::getType(at::Backend::CPU, at::ScalarType::Int).unsafeTensorFromTH((void*)tensor, true);
 }
 
-THDTensorDescriptor* THDTensorDescriptor_newFromTHShortTensor(THShortTensor *tensor) {
-  THShortTensor_retain(tensor);
-  return new THTensor<short>(tensor);
+THDTensorDescriptor THDTensorDescriptor_newFromTHShortTensor(THShortTensor *tensor) {
+  return at::getType(at::Backend::CPU, at::ScalarType::Short).unsafeTensorFromTH((void*)tensor, true);
 }
 
-THDTensorDescriptor* THDTensorDescriptor_newFromTHCharTensor(THCharTensor *tensor) {
-  THCharTensor_retain(tensor);
-  return new THTensor<char>(tensor);
+THDTensorDescriptor THDTensorDescriptor_newFromTHCharTensor(THCharTensor *tensor) {
+  return at::getType(at::Backend::CPU, at::ScalarType::Char).unsafeTensorFromTH((void*)tensor, true);
 }
 
-THDTensorDescriptor* THDTensorDescriptor_newFromTHByteTensor(THByteTensor *tensor) {
-  THByteTensor_retain(tensor);
-  return new THTensor<unsigned char>(tensor);
+THDTensorDescriptor THDTensorDescriptor_newFromTHByteTensor(THByteTensor *tensor) {
+  return at::getType(at::Backend::CPU, at::ScalarType::Byte).unsafeTensorFromTH((void*)tensor, true);
 }
 
-THD_API void THDTensorDescriptor_free(THDTensorDescriptor* desc) {
-  delete desc;
+#ifdef WITH_CUDA
+
+THDTensorDescriptor THDTensorDescriptor_newFromTHCudaDoubleTensor(THCudaDoubleTensor *tensor) {
+  return at::getType(at::Backend::CUDA, at::ScalarType::Double).unsafeTensorFromTH((void*)tensor, true);
 }
+
+THDTensorDescriptor THDTensorDescriptor_newFromTHCudaFloatTensor(THCudaTensor *tensor) {
+  return at::getType(at::Backend::CUDA, at::ScalarType::Float).unsafeTensorFromTH((void*)tensor, true);
+}
+
+THDTensorDescriptor THDTensorDescriptor_newFromTHCudaHalfTensor(THCudaHalfTensor *tensor) {
+  return at::getType(at::Backend::CUDA, at::ScalarType::Half).unsafeTensorFromTH((void*)tensor, true);
+}
+
+THDTensorDescriptor THDTensorDescriptor_newFromTHCudaLongTensor(THCudaLongTensor *tensor) {
+  return at::getType(at::Backend::CUDA, at::ScalarType::Long).unsafeTensorFromTH((void*)tensor, true);
+}
+
+THDTensorDescriptor THDTensorDescriptor_newFromTHCudaIntTensor(THCudaIntTensor *tensor) {
+  return at::getType(at::Backend::CUDA, at::ScalarType::Int).unsafeTensorFromTH((void*)tensor, true);
+}
+
+THDTensorDescriptor THDTensorDescriptor_newFromTHCudaShortTensor(THCudaShortTensor *tensor) {
+  return at::getType(at::Backend::CUDA, at::ScalarType::Short).unsafeTensorFromTH((void*)tensor, true);
+}
+
+THDTensorDescriptor THDTensorDescriptor_newFromTHCudaCharTensor(THCudaCharTensor *tensor) {
+  return at::getType(at::Backend::CUDA, at::ScalarType::Char).unsafeTensorFromTH((void*)tensor, true);
+}
+
+THDTensorDescriptor THDTensorDescriptor_newFromTHCudaByteTensor(THCudaByteTensor *tensor) {
+  return at::getType(at::Backend::CUDA, at::ScalarType::Byte).unsafeTensorFromTH((void*)tensor, true);
+}
+#endif

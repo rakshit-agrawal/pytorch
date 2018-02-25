@@ -46,16 +46,16 @@ class CosineDistance(Module):
             self.ones = input1.new()
 
         torch.mul(input1, input2, out=self.buffer)
-        torch.sum(self.buffer, 1, out=self.w1)
+        torch.sum(self.buffer, 1, out=self.w1, keepdim=True)
 
         epsilon = 1e-12
         torch.mul(input1, input1, out=self.buffer)
-        torch.sum(self.buffer, 1, out=self.w22).add_(epsilon)
+        torch.sum(self.buffer, 1, out=self.w22, keepdim=True).add_(epsilon)
         self.w22.reciprocal_()
         self.w.resize_as_(self.w22).copy_(self.w22)
 
         torch.mul(input2, input2, out=self.buffer)
-        torch.sum(self.buffer, 1, out=self.w32).add_(epsilon)
+        torch.sum(self.buffer, 1, out=self.w32, keepdim=True).add_(epsilon)
         self.w32.reciprocal_()
         self.w.mul_(self.w32)
         self.w.sqrt_()
@@ -90,7 +90,7 @@ class CosineDistance(Module):
         gw2.addcmul_(-1, self.buffer.expand_as(v1), v2)
         gw2.mul_(self.w.expand_as(v1))
 
-        go = gradOutput.view(-1, 1).expand_as(v1)
+        go = gradOutput.contiguous().view(-1, 1).expand_as(v1)
         gw1.mul_(go)
         gw2.mul_(go)
 
